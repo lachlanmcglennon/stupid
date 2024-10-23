@@ -1,0 +1,48 @@
+import socket
+import selectors
+
+sel = selectors.DefaultSelector()
+
+def start_client():
+    server_addr = ('localhost', 12345)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setblocking(False)
+    sock.connect_ex(server_addr)
+    
+    sel.register(sock, selectors.EVENT_WRITE | selectors.EVENT_READ)
+
+    login(sock)
+    
+    try:
+        while True:
+            events = sel.select(timeout=None)
+            for key, mask in events:
+                if mask & selectors.EVENT_WRITE:
+                    send_message(sock, input("Send message (TEXT:<msg>): "))
+                if mask & selectors.EVENT_READ:
+                    receive_message(sock)
+    except KeyboardInterrupt:
+        print("Client stopped.")
+    finally:
+        sel.close()
+
+def login(sock):
+    username = input("Enter username: ")
+    password = input("Enter password: ")
+    login_message = f"LOGIN:{username}:{password}"
+    sock.send(login_message.encode('ascii'))
+
+def send_message(sock, message):
+    sock.send(message.encode('ascii'))
+
+def receive_message(sock):
+    response = sock.recv(1024).decode('ascii')
+    if response:
+        print(f"Received from server: {response}")
+    else:
+        print("Connection closed by server.")
+        sel.unregister(sock)
+        sock.close()
+
+if __name__ == "__main__":
+    start_client()

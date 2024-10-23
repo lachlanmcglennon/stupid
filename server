@@ -1,0 +1,95 @@
+import selectors
+import socket
+import types
+import bcrypt
+
+# Store user data (predefined for simplicity)
+users = {
+    "user1": bcrypt.hashpw("password1".encode('utf-8'), bcrypt.gensalt()),
+    "user2": bcrypt.hashpw("password2".encode('utf-8'), bcrypt.gensalt())
+}
+
+# Store authenticated clients
+authenticated_clients = {}
+
+sel = selectors.DefaultSelector()
+
+# Function to accept new clients
+def accept(sock, mask):
+    conn, addr = sock.accept()  # Should be ready
+    print(f"Accepted connection from {addr}")
+    conn.setblocking(False)
+    data = types.SimpleNamespace(addr=addr, inb=b'', outb=b'')
+    sel.register(conn, selectors.EVENT_READ, data=data)
+
+# Function to handle client communication
+def service_connection(key, mask):
+    sock = key.fileobj
+    data = key.data
+    if mask & selectors.EVENT_READ:
+        recv_data = sock.recv(1024)  # Should be ready to read
+        if recv_data:
+            message = recv_data.decode('ascii')
+            response = handle_message(sock, message, data)
+            if response:
+                data.outb += response.encode('ascii')
+        else:
+            print(f"Closing connection to {data.addr}")
+            sel.unregister(sock)
+            sock.close()
+    if mask & selectors.EVENT_WRITE:
+        if data.outb:
+            sent = sock.send(data.outb)  # Should be ready to write
+            data.outb = data.outb[sent:]
+
+# Function to handle different message types
+def handle_message(sock, message, data):
+    if message.startswith("LOGIN:"):
+        return handle_login(sock, message)
+    elif sock in authenticated_clients:
+        if message.startswith("TEXT:"):
+            msg = message[len("TEXT:"):].strip()
+            return f"RECIV:{msg}"
+        else:
+            return "INVALID COMMAND"
+    else:
+        return "BADAUTH"
+
+# Function to handle LOGIN command
+def handle_login(sock, message):
+    try:
+        _, username, password = message.split(":")
+        password = password.strip()
+        if username in users and bcrypt.checkpw(password.encode('utf-8'), users[username]):
+            authenticated_clients[sock] = username
+            return "OK"
+        else:
+            return "INVALIDLOGIN"
+    except Exception:
+        return "INVALIDLOGIN"
+
+# Server setup
+def start_server():
+    server_addr = ('localhost', 12345)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(server_addr)
+    sock.listen()
+    print(f"Server started on {server_addr}")
+    sock.setblocking(False)
+    sel.register(sock, selectors.EVENT_READ, data=None)
+
+    try:
+        while True:
+            events = sel.select(timeout=None)
+            for key, mask in events:
+                if key.data is None:
+                    accept(key.fileobj, mask)
+                else:
+                    service_connection(key, mask)
+    except KeyboardInterrupt:
+        print("Server stopped.")
+    finally:
+        sel.close()
+
+if __name__ == "__main__":
+    start_server()

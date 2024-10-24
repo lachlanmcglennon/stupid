@@ -1,0 +1,85 @@
+def send_inprogress_message(room, viewer):
+    current_turn_player = authenticated_clients[room.current_turn].user
+    opposing_player = authenticated_clients[room.player1 if room.current_turn == room.player2 else room.player2].user
+
+    # INPROGRESS message
+    inprogress_message = f"INPROGRESS:{current_turn_player}:{opposing_player}"
+
+    # Send the message to the viewer
+    send_client(viewer, inprogress_message)
+
+def broadcast_board_status(room):
+    board_status = ''.join([str(x) for x in room.board])
+    board_status_message = f"BOARDSTATUS:{board_status}"
+
+    # Send to both players
+    if room.player1:
+        send_client(authenticated_clients[room.player1], board_status_message)
+    if room.player2:
+        send_client(authenticated_clients[room.player2], board_status_message)
+
+    # Send to all viewers
+    for viewer in room.viewers:
+        send_client(authenticated_clients[viewer], board_status_message)
+
+def handle_place_message(sock, message, room):
+    _, x, y = message.split(":")
+    x, y = int(x), int(y)
+    board_index = x * 3 + y
+
+    if room.board[board_index] == 0:
+        current_player = authenticated_clients[sock].user
+        marker = 1 if sock == room.player1 else 2
+        room.board[board_index] = marker
+        room.current_turn = room.player2 if room.current_turn == room.player1 else room.player1
+
+        # Broadcast the updated board status
+        broadcast_board_status(room)
+
+def handle_forfeit_message(sock, room):
+    forfeiting_player = authenticated_clients[sock].user
+    winner_sock = room.player2 if sock == room.player1 else room.player1
+    winner = authenticated_clients[winner_sock].user
+
+    # Game end message
+    game_end_message = f"GAMEEND:{''.join([str(x) for x in room.board])}:2:{winner}"
+
+    # Notify both players
+    send_client(authenticated_clients[room.player1], game_end_message)
+    send_client(authenticated_clients[room.player2], game_end_message)
+
+    # Notify viewers
+    for viewer in room.viewers:
+        send_client(authenticated_clients[viewer], game_end_message)
+
+    # Remove the room after the game ends
+    gameRooms.remove(room)
+
+def send_game_end_message(room, status_code, winner=None):
+    board_status = ''.join([str(x) for x in room.board])
+    if status_code == 0:
+        game_end_message = f"GAMEEND:{board_status}:0:{winner}"
+    elif status_code == 1:
+        game_end_message = f"GAMEEND:{board_status}:1"
+    elif status_code == 2:
+        game_end_message = f"GAMEEND:{board_status}:2:{winner}"
+
+    # Send to both players
+    if room.player1:
+        send_client(authenticated_clients[room.player1], game_end_message)
+    if room.player2:
+        send_client(authenticated_clients[room.player2], game_end_message)
+
+    # Send to viewers
+    for viewer in room.viewers:
+        send_client(authenticated_clients[viewer], game_end_message)
+
+    # Remove the room after the game ends
+    gameRooms.remove(room)
+
+def send_noroom_message(client_data):
+    send_client(client_data, "NOROOM")
+
+def send_client(client_data, msg):
+    client_data.outb += msg.encode('utf-8')
+    sel.modify(client_data.socket, selectors.EVENT_READ | selectors.EVENT_WRITE, data=client_data)

@@ -1,0 +1,34 @@
+def handle_begin_game(room):
+    try:
+        # Ensure both players are present
+        if room.player1 is None or room.player2 is None:
+            print(f"Room {room.name} does not have two players to start the game.")
+            return
+
+        # Retrieve player data from room (assume client_data contains the player's information)
+        player1_data = authenticated_clients[room.player1]
+        player2_data = authenticated_clients[room.player2]
+
+        # Construct the BEGIN message
+        begin_message = f"BEGIN:{player1_data.user}:{player2_data.user}"
+
+        # Add the BEGIN message to the outb buffer of both players
+        player1_data.outb += begin_message.encode('utf-8')
+        player2_data.outb += begin_message.encode('utf-8')
+
+        # Modify both players' sockets to listen for write events (to send the message)
+        sel.modify(room.player1, selectors.EVENT_READ | selectors.EVENT_WRITE, data=player1_data)
+        sel.modify(room.player2, selectors.EVENT_READ | selectors.EVENT_WRITE, data=player2_data)
+
+        # Notify viewers that the game has started (if any)
+        for viewer_sock in room.viewers:
+            viewer_data = authenticated_clients[viewer_sock]
+            viewer_data.outb += f"GAME STARTED IN ROOM {room.name}".encode('utf-8')
+            sel.modify(viewer_sock, selectors.EVENT_READ | selectors.EVENT_WRITE, data=viewer_data)
+
+        # Update the game status in the room to indicate the game is in progress
+        room.game_status = "in-progress"
+        print(f"Game started between {player1_data.user} and {player2_data.user} in room {room.name}")
+
+    except Exception as e:
+        print(f"Error starting the game in room {room.name}: {e}")

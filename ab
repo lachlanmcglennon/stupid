@@ -1,0 +1,46 @@
+def handle_join(sock, message, client_data):
+    try:
+        # Split the message into parts
+        parts = message.split(":")
+        if len(parts) != 3:
+            return "JOIN:ACKSTATUS:3"  # Invalid format
+
+        room_name = parts[1].strip()
+        mode = parts[2].strip().upper()
+
+        # Validate mode
+        if mode not in ["PLAYER", "VIEWER"]:
+            return "JOIN:ACKSTATUS:3"  # Invalid mode
+
+        # Check if the room exists
+        matching_room = None
+        for room in gameRooms:
+            if room.name == room_name:
+                matching_room = room
+                break
+
+        if not matching_room:
+            return f"JOIN:ACKSTATUS:1"  # No room with the specified name exists
+
+        # If joining as a player
+        if mode == "PLAYER":
+            if matching_room.player1 and matching_room.player2:
+                return f"JOIN:ACKSTATUS:2"  # Room already has 2 players
+            if not matching_room.player1:
+                matching_room.player1 = sock  # Add player1
+            elif not matching_room.player2:
+                matching_room.player2 = sock  # Add player2
+            client_data.isPlayer = True
+            client_data.room = room_name
+
+        # If joining as a viewer
+        elif mode == "VIEWER":
+            matching_room.viewers.append(sock)  # Add viewer to the room
+            client_data.isViewer = True
+            client_data.room = room_name
+
+        return f"JOIN:ACKSTATUS:0"  # Successful join
+
+    except Exception as e:
+        print(f"Error during room join: {e}")
+        return "JOIN:ACKSTATUS:3"  # Invalid format or other error

@@ -1,0 +1,129 @@
+def load_server_config(config_path):
+    # Check if the config file exists
+    if not os.path.exists(config_path):
+        print(f"Error: {config_path} doesn’t exist.")
+        sys.exit(1)
+
+    # Load and parse the JSON configuration file
+    try:
+        with open(config_path, 'r') as file:
+            config = json.load(file)
+    except json.JSONDecodeError:
+        print(f"Error: {config_path} is not in a valid JSON format.")
+        sys.exit(1)
+
+    # Required keys
+    required_keys = ['port', 'userDatabase']
+    missing_keys = [key for key in required_keys if key not in config]
+
+    # Check for missing keys
+    if missing_keys:
+        missing_keys_sorted = ', '.join(sorted(missing_keys))
+        print(f"Error: {config_path} missing key(s): {missing_keys_sorted}")
+        sys.exit(1)
+
+    # Validate the port number
+    port = config['port']
+    if not isinstance(port, int) or not (1024 <= port <= 65535):
+        print("Error: port number out of range")
+        sys.exit(1)
+
+    # Handle the userDatabase path, expanding ~ to the user's home directory
+    user_database_path = os.path.expanduser(config['userDatabase'])
+
+    # Check if the expanded user database path is valid (you can add further checks if needed)
+    if not os.path.exists(os.path.dirname(user_database_path)):
+        print(f"Error: {user_database_path} doesn’t exist.")
+        sys.exit(1)
+
+    # Return the configuration (port and user database path)
+    return {
+        "port": port,
+        "userDatabase": user_database_path
+    }
+
+# Main function to initialize the server
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print("Usage: python server.py <config_file>")
+        sys.exit(1)
+
+    config_path = sys.argv[1]
+
+    # Load the server configuration from the provided file
+    config = load_server_config(config_path)
+
+    # Now you can use the config['port'] and config['userDatabase']
+    print(f"Starting server on port {config['port']} with user database {config['userDatabase']}")
+
+
+
+
+def handle_roomlist(sock, message):
+    try:
+        # Split the message into parts
+        parts = message.split(":")
+        if len(parts) != 2:
+            return "ROOMLIST:ACKSTATUS:1"  # Invalid format
+
+        mode = parts[1].strip().upper()
+
+        # Validate the mode
+        if mode not in ["PLAYER", "VIEWER"]:
+            return "ROOMLIST:ACKSTATUS:1"  # Invalid mode
+
+        # Filter and sort room names based on the mode
+        if mode == "PLAYER":
+            # Find rooms that have space for players
+            available_rooms = [room for room, info in rooms.items() if info['players'] < info['max_players']]
+        elif mode == "VIEWER":
+            # Find rooms that have space for viewers
+            available_rooms = [room for room, info in rooms.items() if info['viewers'] < info['max_viewers']]
+
+        # Sort the room list alphabetically
+        available_rooms.sort()
+
+        # Join the room list into a comma-separated string
+        room_list_str = ",".join(available_rooms)
+
+        return f"ROOMLIST:ACKSTATUS:0:{room_list_str}"  # Success message
+
+    except Exception as e:
+        print(f"Error handling ROOMLIST: {e}")
+        return "ROOMLIST:ACKSTATUS:1"  # General error response
+
+def handle_create_room(sock, message):
+    try:
+        # Split the message into parts
+        parts = message.split(":")
+        if len(parts) != 2:
+            return "CREATE:ACKSTATUS:4"  # Invalid format (wrong number of arguments)
+
+        room_name = parts[1].strip()
+
+        # Check if the room name is valid
+        if len(room_name) > 20 or not valid_room_name_pattern.match(room_name):
+            return f"CREATE:ACKSTATUS:1"  # Invalid room name
+
+        # Check if the room already exists
+        if room_name in rooms:
+            return f"CREATE:ACKSTATUS:2"  # Room already exists
+
+        # Check if the maximum number of rooms has been reached
+        if len(rooms) >= MAX_ROOMS:
+            return f"CREATE:ACKSTATUS:3"  # Maximum rooms reached
+
+        # Create the room and add it to the rooms dictionary
+        rooms[room_name] = {
+            "players": [sock],  # Add the current socket (user) to the room
+            "status": "waiting"  # Room is in "waiting" state until another player joins
+        }
+
+        # Automatically add the player who created the room
+        authenticated_clients[sock]['room'] = room_name
+
+        return f"CREATE:ACKSTATUS:0"  # Room successfully created
+
+    except Exception as e:
+        print(f"Error during room creation: {e}")
+        return "CREATE:ACKSTATUS:4"  # Invalid format or other error

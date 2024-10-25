@@ -1,0 +1,22 @@
+def check_game_status(board_array: list[int]) -> int:
+    # Convert the 9-element array into a 3x3 board
+    board = [
+        [EMPTY if board_array[i] == 0 else CROSS if board_array[i] == 1 else NOUGHT for i in range(0, 3)],
+        [EMPTY if board_array[i] == 0 else CROSS if board_array[i] == 1 else NOUGHT for i in range(3, 6)],
+        [EMPTY if board_array[i] == 0 else CROSS if board_array[i] == 1 else NOUGHT for i in range(6, 9)],
+    ]
+
+    # Check if 'X' wins
+    if player_wins(CROSS, board):
+        return 1
+
+    # Check if 'O' wins
+    if player_wins(NOUGH, board):
+        return 2
+
+    # Check for a draw
+    if players_draw(board):
+        return 3
+
+    # No winner yet
+    return 0

@@ -1,115 +1,97 @@
 import socket
 import sys
+import selectors
+
+sel = selectors.DefaultSelector()
+
+def start_connection(server_address, port):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setblocking(False)
+    sock.connect_ex((server_address, port))  # Non-blocking connect
+    sel.register(sock, selectors.EVENT_READ, receive_message)
+    return sock
+
+def receive_message(sock):
+    try:
+        data = sock.recv(1024).decode('utf-8')
+        if data:
+            if data.startswith("LOGIN:"):
+                handle_login_response(data)
+            elif data.startswith("REGISTER:"):
+                handle_register_response(data)
+            elif data.startswith("ROOMLIST:"):
+                handle_roomlist_response(data)
+            elif data.startswith("CREATE:"):
+                handle_create_response(data)
+            elif data.startswith("JOIN:"):
+                handle_join_response(data)
+            elif data.startswith("BOARDSTATUS:"):
+                handle_boardstatus(data)
+            elif data.startswith("GAMEEND:"):
+                handle_gameend(data)
+            else:
+                print("Unknown message received from server. Exiting...")
+                sys.exit(1)
+    except BlockingIOError:
+        pass  # Nothing to read
+
+def handle_user_input(sock):
+    user_input = sys.stdin.readline().strip()
+    if user_input.upper() == "QUIT":
+        print("Exiting...")
+        sel.unregister(sock)
+        sock.close()
+        sys.exit(0)
+    elif user_input.upper() == "LOGIN":
+        username = input("Enter username: ")
+        password = input("Enter password: ")
+        send_message(sock, f"LOGIN:{username}:{password}")
+    elif user_input.upper() == "REGISTER":
+        username = input("Enter username: ")
+        if len(username) > 20:
+            print("Error: username length limitation is 20 characters.")
+            return
+        password = input("Enter password: ")
+        if len(password) > 20:
+            print("Error: password length limitation is 20 characters.")
+            return
+        send_message(sock, f"REGISTER:{username}:{password}")
+    elif user_input.upper() == "ROOMLIST":
+        mode = input("Do you want to have a room list as player or viewer? (Player/Viewer): ").strip().lower()
+        if mode not in ["player", "viewer"]:
+            print("Error: Please input a valid mode.")
+            return
+        send_message(sock, f"ROOMLIST:{mode.capitalize()}")
+    elif user_input.upper() == "CREATE":
+        room_name = input("Enter room name you want to create: ").strip()
+        send_message(sock, f"CREATE:{room_name}")
+    elif user_input.upper() == "JOIN":
+        room_name = input("Enter room name you want to join: ").strip()
+        mode = input("You wish to join the room as: (Player/Viewer): ").strip().lower()
+        if mode not in ["player", "viewer"]:
+            print("Unknown input.")
+            return
+        send_message(sock, f"JOIN:{room_name}:{mode.capitalize()}")
+    elif user_input.upper() == "PLACE":
+        try:
+            col = int(input("Enter column (0-2): "))
+            row = int(input("Enter row (0-2): "))
+            if not (0 <= col <= 2) or not (0 <= row <= 2):
+                print("Column/Row values must be an integer between 0 and 2.")
+                return
+            send_message(sock, f"PLACE:{col}:{row}")
+        except ValueError:
+            print("Column/Row values must be an integer between 0 and 2.")
+    elif user_input.upper() == "FORFEIT":
+        send_message(sock, "FORFEIT")
+    else:
+        print(f"Unknown command: {user_input.upper()}")
 
 def send_message(sock, message):
     try:
         sock.sendall(message.encode('utf-8'))
     except Exception as e:
         print(f"Error sending message: {e}")
-        sys.exit(1)
-
-def handle_login_response(response):
-    parts = response.split(":")
-    if parts[1] == "ACKSTATUS":
-        status = parts[2]
-        if status == "0":
-            print(f"Welcome {parts[3]}")
-        elif status == "1":
-            print(f"Error: User {parts[3]} not found", file=sys.stderr)
-        elif status == "2":
-            print(f"Error: Wrong password for user {parts[3]}", file=sys.stderr)
-        elif status == "3":
-            print("Error: Invalid login format", file=sys.stderr)
-
-def handle_register_response(response):
-    parts = response.split(":")
-    if parts[1] == "ACKSTATUS":
-        status = parts[2]
-        if status == "0":
-            print(f"Successfully created user account {parts[3]}")
-        elif status == "1":
-            print(f"Error: User {parts[3]} already exists", file=sys.stderr)
-        elif status == "2":
-            print("Error: Invalid registration format", file=sys.stderr)
-
-def handle_roomlist_response(response):
-    parts = response.split(":")
-    if parts[1] == "ACKSTATUS" and parts[2] == "0":
-        rooms = parts[3]
-        print(f"Room available to join as <mode>: {rooms}")
-    elif parts[1] == "ACKSTATUS" and parts[2] == "1":
-        print("Error: Please input a valid mode.", file=sys.stderr)
-
-def handle_create_response(response):
-    parts = response.split(":")
-    if parts[1] == "ACKSTATUS":
-        status = parts[2]
-        if status == "0":
-            print(f"Successfully created room {parts[3]}")
-        elif status == "1":
-            print(f"Error: Room {parts[3]} is invalid", file=sys.stderr)
-        elif status == "2":
-            print(f"Error: Room {parts[3]} already exists", file=sys.stderr)
-        elif status == "3":
-            print("Error: Server already contains a maximum of 256 rooms", file=sys.stderr)
-        elif status == "4":
-            print("Error: Invalid CREATE message format", file=sys.stderr)
-
-def handle_join_response(response):
-    parts = response.split(":")
-    if parts[1] == "ACKSTATUS":
-        status = parts[2]
-        if status == "0":
-            print(f"Successfully joined room {parts[3]} as a {parts[4]}")
-        elif status == "1":
-            print(f"Error: No room named {parts[3]}", file=sys.stderr)
-        elif status == "2":
-            print(f"Error: Room {parts[3]} already has 2 players", file=sys.stderr)
-        elif status == "3":
-            print("Error: Invalid JOIN message format", file=sys.stderr)
-
-def handle_boardstatus(response):
-    parts = response.split(":")
-    board_status = parts[1]
-    print("Board status:")
-    for i in range(0, 9, 3):
-        print(board_status[i:i+3])
-    
-def handle_gameend(response):
-    parts = response.split(":")
-    board_status = parts[1]
-    status_code = parts[2]
-    if status_code == "0":
-        winner = parts[3]
-        print(f"Congratulations, {winner} won!")
-    elif status_code == "1":
-        print("Game ended in a draw.")
-    elif status_code == "2":
-        winner = parts[3]
-        print(f"{winner} won due to opponent forfeiting.")
-
-def receive_message(sock):
-    try:
-        data = sock.recv(1024).decode('utf-8')
-        if data.startswith("LOGIN:"):
-            handle_login_response(data)
-        elif data.startswith("REGISTER:"):
-            handle_register_response(data)
-        elif data.startswith("ROOMLIST:"):
-            handle_roomlist_response(data)
-        elif data.startswith("CREATE:"):
-            handle_create_response(data)
-        elif data.startswith("JOIN:"):
-            handle_join_response(data)
-        elif data.startswith("BOARDSTATUS:"):
-            handle_boardstatus(data)
-        elif data.startswith("GAMEEND:"):
-            handle_gameend(data)
-        else:
-            print("Unknown message received from server. Exiting...")
-            sys.exit(1)
-    except Exception as e:
-        print(f"Error receiving message: {e}")
         sys.exit(1)
 
 def client_main():
@@ -121,66 +103,20 @@ def client_main():
     port = int(sys.argv[2])
 
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.connect((server_address, port))
-        print("Connected to the server.")
+        sock = start_connection(server_address, port)
+        print(f"Connected to server at {server_address}:{port}")
     except Exception as e:
         print(f"Error: cannot connect to server at {server_address} and {port}.")
         sys.exit(1)
 
+    sel.register(sys.stdin, selectors.EVENT_READ, lambda x: handle_user_input(sock))
+
     while True:
-        command = input("Enter command (LOGIN, REGISTER, ROOMLIST, CREATE, JOIN, PLACE, FORFEIT, QUIT): ").strip().upper()
-
-        if command == "QUIT":
-            print("Exiting...")
-            break
-        elif command == "LOGIN":
-            username = input("Enter username: ")
-            password = input("Enter password: ")
-            send_message(sock, f"LOGIN:{username}:{password}")
-        elif command == "REGISTER":
-            username = input("Enter username: ")
-            if len(username) > 20:
-                print("Error: username length limitation is 20 characters.")
-                continue
-            password = input("Enter password: ")
-            if len(password) > 20:
-                print("Error: password length limitation is 20 characters.")
-                continue
-            send_message(sock, f"REGISTER:{username}:{password}")
-        elif command == "ROOMLIST":
-            mode = input("Do you want to have a room list as player or viewer? (Player/Viewer): ").strip().lower()
-            if mode not in ["player", "viewer"]:
-                print("Error: Please input a valid mode.")
-                continue
-            send_message(sock, f"ROOMLIST:{mode.capitalize()}")
-        elif command == "CREATE":
-            room_name = input("Enter room name you want to create: ").strip()
-            send_message(sock, f"CREATE:{room_name}")
-        elif command == "JOIN":
-            room_name = input("Enter room name you want to join: ").strip()
-            mode = input("You wish to join the room as: (Player/Viewer): ").strip().lower()
-            if mode not in ["player", "viewer"]:
-                print("Unknown input.")
-                continue
-            send_message(sock, f"JOIN:{room_name}:{mode.capitalize()}")
-        elif command == "PLACE":
-            try:
-                col = int(input("Enter column (0-2): "))
-                row = int(input("Enter row (0-2): "))
-                if not (0 <= col <= 2) or not (0 <= row <= 2):
-                    print("Column/Row values must be an integer between 0 and 2.")
-                    continue
-                send_message(sock, f"PLACE:{col}:{row}")
-            except ValueError:
-                print("Column/Row values must be an integer between 0 and 2.")
-                continue
-        elif command == "FORFEIT":
-            send_message(sock, "FORFEIT")
-        else:
-            print(f"Unknown command: {command}")
-
-        receive_message(sock)
+        events = sel.select()
+        for key, _ in events:
+            callback = key.data
+            callback(key.fileobj)
 
 if __name__ == "__main__":
     client_main()
+
